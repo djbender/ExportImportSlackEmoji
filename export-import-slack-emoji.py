@@ -1,3 +1,5 @@
+#!/usr/bin/env python
+
 import requests
 import json
 import re
@@ -72,14 +74,20 @@ for emojiName in emojiNameToUrlDict:
 destinationEmojiNameToUrlDict = getEmojiNameToUrlDict(destinationSlackOrgHeaders)
 
 url = 'https://slack.com/api/emoji.add'
-emojiNum = 0
 
+def printProgress(position, total, msg):
+    print(f'[{position}/{total}] {msg}')
+
+existingEmojiFileNames.sort()
 for emojiFileName in existingEmojiFileNames:
+    position = existingEmojiFileNames.index(emojiFileName)
+    total = len(existingEmojiFileNames)
+    progress = '{position}/{total}'
 
     emojiFileNameWithoutExtension = emojiFileExtension = re.search('([^\.]+)\.', emojiFileName).group(1)
 
     if emojiFileNameWithoutExtension in destinationEmojiNameToUrlDict:
-        print(f'Emoji with a name of {emojiFileNameWithoutExtension} already exits in destination, skipping upload')
+        printProgress(position, total, f'Emoji already exits in destination, skipping upload: "{emojiFileNameWithoutExtension}"')
         continue
 
     emojiUploaded = False
@@ -100,18 +108,27 @@ for emojiFileName in existingEmojiFileNames:
         responseJson = json.loads(response.content)
 
         if responseJson["ok"]:
-            print(f'Uploaded {emojiFileName}')
+            printProgress(position, total, f'Uploaded {emojiFileName}')
             emojiUploaded = True
         elif not responseJson["ok"] and responseJson["error"] == "error_name_taken":
-            print(f'Emoji with a name of {emojiFileNameWithoutExtension} already exits')
+            printProgress(position, total, f'Emoji already exits in destination, skipping upload: "{emojiFileNameWithoutExtension}"')
+            emojiUploaded = True
+        elif not responseJson["ok"] and responseJson["error"] == "error_name_taken_i18n":
+            printProgress(position, total, f'Emoji already exits in destination, skipping upload: "{emojiFileNameWithoutExtension}"')
             emojiUploaded = True
         elif not responseJson["ok"] and responseJson["error"] == "ratelimited":
-            retryAfter = response.headers['retry-after']
-            retryAfterInt = int(retryAfter) + 1
-            print(f'Exceeded rate limit, waiting {retryAfterInt} seconds before retrying')
-            time.sleep(retryAfterInt)
+            retryAfter = int(response.headers['retry-after'])
+            printProgress(position, total, f'Exceeded rate limit, waiting {retryAfter} seconds before retrying')
+            time.sleep(retryAfter)
         else:
-            print(f'Unexpected failure! {responseJson["error"]}')
-            print(response)
-            print(response.headers)
+            printProgress(position, total, f'Unexpected failure! {responseJson["error"]}')
+            printProgress(position, total, response)
+            printProgress(position, total, response.headers)
+            printProgress(position, total, response.json)
             break
+
+        # this endpoint is a Tier 2 rate limited api, which means it can execute 20 times per
+        # minute without throttling. Instead of hitting the rate limit each time, we can
+        # instead insert a sleep here of three seconds to then never need to retry. This is
+        # however left out as a default in case the API Tiering rules change.
+        # time.sleep(3)
